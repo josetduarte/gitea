@@ -32,7 +32,7 @@
 		{{/* Filter Bar */}}
 		<div class="ui attached segment tw-flex tw-gap-2 tw-mb-0" style="border-top: none;">
 			{{/* Milestone Filter */}}
-			{{$queryLink := QueryBuild "?" "milestone" .MilestoneID}}
+			{{$queryLink := QueryBuild "?" "milestone" .MilestoneID "labels" .SelectLabels "assignee" .AssigneeID}}
 			<div class="item ui dropdown jump {{if not (or .OpenMilestones .ClosedMilestones)}}disabled{{end}}">
 				<span class="text">
 					{{svg "octicon-milestone" 16 "tw-mr-1"}}
@@ -81,6 +81,20 @@
 					{{end}}
 				</div>
 			</div>
+
+			{{/* Label Filter */}}
+			{{template "repo/issue/filter_item_label" dict "Labels" .Labels "QueryLink" $queryLink}}
+
+			{{/* Assignee Filter */}}
+			{{template "repo/issue/filter_item_user_assign" dict
+				"QueryParamKey" "assignee"
+				"QueryLink" $queryLink
+				"UserSearchList" $.Assignees
+				"SelectedUserId" $.AssigneeID
+				"TextFilterTitle" (ctx.Locale.Tr "repo.issues.filter_assignee")
+				"TextFilterMatchNone" (ctx.Locale.Tr "repo.issues.filter_assignee_no_assignee")
+				"TextFilterMatchAny" (ctx.Locale.Tr "repo.issues.filter_assignee_any_assignee")
+			}}
 		</div>
 
 		{{/* Issue Tree */}}
@@ -112,14 +126,14 @@
 	<div class="issue-card" style="margin-bottom: 0.5rem; position: relative;">
 		{{/* Expand/Collapse Toggle */}}
 		{{if .Children}}
-			<button class="issue-toggle tw-flex-shrink-0 tw-p-1 tw-border-0 tw-bg-transparent tw-cursor-pointer" 
-				data-issue-id="{{.Issue.ID}}" 
-				aria-label="Toggle children" 
+			<button class="issue-toggle tw-flex-shrink-0 tw-p-1 tw-border-0 tw-bg-transparent tw-cursor-pointer"
+				data-issue-id="{{.Issue.ID}}"
+				aria-label="Toggle children"
 				style="position: absolute; left: 4px; top: 4px; z-index: 1;">
 				<span class="toggle-icon">{{svg "octicon-chevron-down" 16}}</span>
 			</button>
 		{{end}}
-		
+
 		<div class="content tw-w-full" style="{{if .Children}}padding-left: 24px;{{end}}">
 			<div class="tw-flex tw-items-start tw-gap-[5px]">
 				<div class="issue-card-icon">
@@ -150,20 +164,11 @@
 			{{end}}
 			{{if .Children}}
 			<div class="meta tw-my-1">
-				{{$openCount := 0}}
-				{{$closedCount := 0}}
-				{{range .Children}}
-					{{if .Issue.IsClosed}}
-						{{$closedCount = Eval $closedCount "+" 1}}
-					{{else}}
-						{{$openCount = Eval $openCount "+" 1}}
-					{{end}}
-				{{end}}
 				{{svg "octicon-issue-opened" 14 "tw-mr-1 tw-align-middle"}}
-				<span class="tw-align-middle">{{$openCount}} {{ctx.Locale.Tr "repo.issues.open_title"}}</span>
+				<span class="tw-align-middle">{{.CountOpenDescendants}} {{ctx.Locale.Tr "repo.issues.open_title"}}</span>
 				<span class="tw-mx-1">·</span>
 				{{svg "octicon-check" 14 "tw-mr-1 tw-align-middle"}}
-				<span class="tw-align-middle">{{$closedCount}} {{ctx.Locale.Tr "repo.issues.closed_title"}}</span>
+				<span class="tw-align-middle">{{.CountClosedDescendants}} {{ctx.Locale.Tr "repo.issues.closed_title"}}</span>
 			</div>
 			{{end}}
 			{{$tasks := .Issue.GetTasks}}

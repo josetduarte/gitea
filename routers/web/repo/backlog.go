@@ -5,11 +5,15 @@ package repo
 
 import (
 	"net/http"
+	"strconv"
 
 	"code.gitea.io/gitea/models/db"
 	issues_model "code.gitea.io/gitea/models/issues"
+	repo_model "code.gitea.io/gitea/models/repo"
 	"code.gitea.io/gitea/modules/optional"
 	"code.gitea.io/gitea/modules/templates"
+	"code.gitea.io/gitea/routers/web/shared/issue"
+	shared_user "code.gitea.io/gitea/routers/web/shared/user"
 	"code.gitea.io/gitea/services/context"
 )
 
@@ -24,6 +28,123 @@ type IssueNode struct {
 	Level    int
 }
 
+// CountOpenDescendants recursively counts all open descendant issues
+func (n *IssueNode) CountOpenDescendants() int {
+	count := 0
+	for _, child := range n.Children {
+		if !child.Issue.IsClosed {
+			count++
+		}
+		count += child.CountOpenDescendants()
+	}
+	return count
+}
+
+// CountClosedDescendants recursively counts all closed descendant issues
+func (n *IssueNode) CountClosedDescendants() int {
+	count := 0
+	for _, child := range n.Children {
+		if child.Issue.IsClosed {
+			count++
+		}
+		count += child.CountClosedDescendants()
+	}
+	return count
+}
+
+// MatchesFilter checks if this node or any of its descendants match the filter criteria
+func (n *IssueNode) MatchesFilter(labelIDs []int64, assigneeID int64, milestoneID int64) bool {
+	// Check if this node matches
+	if nodeMatchesFilter(n.Issue, labelIDs, assigneeID, milestoneID) {
+		return true
+	}
+	// Check if any descendant matches
+	for _, child := range n.Children {
+		if child.MatchesFilter(labelIDs, assigneeID, milestoneID) {
+			return true
+		}
+	}
+	return false
+}
+
+// nodeMatchesFilter checks if an issue matches the filter criteria
+func nodeMatchesFilter(issue *issues_model.Issue, labelIDs []int64, assigneeID int64, milestoneID int64) bool {
+	// If no filters, everything matches
+	if len(labelIDs) == 0 && assigneeID == 0 && milestoneID == 0 {
+		return true
+	}
+
+	// Check milestone filter
+	if milestoneID != 0 {
+		if milestoneID == -1 {
+			// Filter for issues with no milestone
+			if issue.MilestoneID != 0 {
+				return false
+			}
+		} else {
+			// Filter for specific milestone
+			if issue.MilestoneID != milestoneID {
+				return false
+			}
+		}
+	}
+
+	// Check label filter
+	if len(labelIDs) > 0 {
+		issueLabelMap := make(map[int64]bool)
+		for _, label := range issue.Labels {
+			issueLabelMap[label.ID] = true
+		}
+		hasMatchingLabel := false
+		for _, labelID := range labelIDs {
+			if issueLabelMap[labelID] {
+				hasMatchingLabel = true
+				break
+			}
+		}
+		if !hasMatchingLabel {
+			return false
+		}
+	}
+
+	// Check assignee filter
+	if assigneeID != 0 {
+		hasMatchingAssignee := false
+		for _, assignee := range issue.Assignees {
+			if assignee.ID == assigneeID {
+				hasMatchingAssignee = true
+				break
+			}
+		}
+		if !hasMatchingAssignee {
+			return false
+		}
+	}
+
+	return true
+}
+
+// FilterTree filters the tree to only include nodes that match the filter or have matching descendants
+func (n *IssueNode) FilterTree(labelIDs []int64, assigneeID int64, milestoneID int64) *IssueNode {
+	if !n.MatchesFilter(labelIDs, assigneeID, milestoneID) {
+		return nil
+	}
+
+	// Create new node with filtered children
+	filteredNode := &IssueNode{
+		Issue: n.Issue,
+		Level: n.Level,
+	}
+
+	for _, child := range n.Children {
+		if filteredChild := child.FilterTree(labelIDs, assigneeID, milestoneID); filteredChild != nil {
+			filteredNode.Children = append(filteredNode.Children, filteredChild)
+		}
+	}
+
+	return filteredNode
+}
+
 // Backlog shows the backlog view with tree hierarchy by dependencies
 func Backlog(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.issues.backlog")
@@ -32,6 +153,26 @@ func Backlog(ctx *context.Context) {
 
 	// Get filter parameters
 	milestoneID := ctx.FormInt64("milestone")
+	assigneeID := ctx.FormString("assignee")
+
+	// Get label filter
+	labelFilter := issue.PrepareFilterIssueLabels(ctx, ctx.Repo.Repository.ID, ctx.Repo.Owner)
+	if ctx.Written() {
+		return
+	}
+	ctx.Data["SelLabelIDs"] = labelFilter.SelectedLabelIDs
+
+	// Get assignees for the filter dropdown
+	assigneeUsers, err := repo_model.GetRepoAssignees(ctx, ctx.Repo.Repository)
+	if err != nil {
+		ctx.ServerError("GetRepoAssignees", err)
+		return
+	}
+	ctx.Data["Assignees"] = shared_user.MakeSelfOnTop(ctx.Doer, assigneeUsers)
+	ctx.Data["AssigneeID"] = assigneeID
+
+	// Parse assigneeID as int64 for filtering
+	assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
 
 	// Get all milestones for the filter dropdown
 	milestones, err := db.Find[issues_model.Milestone](ctx, issues_model.FindMilestoneOptions{
@@ -54,18 +195,12 @@ func Backlog(ctx *context.Context) {
 	ctx.Data["ClosedMilestones"] = closedMilestones
 	ctx.Data["MilestoneID"] = milestoneID
 
-	// Build issue options for filtering
+	// Build issue options - get ALL open issues (milestone filtering done via tree pruning)
 	issueOpts := &issues_model.IssuesOptions{
 		RepoIDs:  []int64{ctx.Repo.Repository.ID},
 		IsPull:   optional.Some(false),
 		IsClosed: optional.Some(false),
 		SortType: "priority",
-	}
-
-	if milestoneID > 0 {
-		issueOpts.MilestoneIDs = []int64{milestoneID}
-	} else if milestoneID == -1 {
-		issueOpts.MilestoneIDs = []int64{db.NoConditionID}
 	}
 
 	// Get all open issues
@@ -122,6 +257,17 @@ func Backlog(ctx *context.Context) {
 		if node != nil {
 			tree = append(tree, node)
 		}
+	}
+
+	// Filter tree based on milestone, label and assignee filters
+	if milestoneID != 0 || len(labelFilter.SelectedLabelIDs) > 0 || assigneeIDInt != 0 {
+		filteredTree := make([]*IssueNode, 0)
+		for _, node := range tree {
+			if filteredNode := node.FilterTree(labelFilter.SelectedLabelIDs, assigneeIDInt, milestoneID); filteredNode != nil {
+				filteredTree = append(filteredTree, filteredNode)
+			}
+		}
+		tree = filteredTree
 	}
 
 	ctx.Data["IssueTree"] = tree
