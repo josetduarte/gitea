@@ -146,39 +146,41 @@
 								<span class="ui small label">{{CountFmt .Repository.NumOpenIssues}}</span>
 							{{end}}
 						</a>
-					<a class="{{if .PageIsBacklog}}active {{end}}item" href="{{.RepoLink}}/backlog">
-						{{svg "octicon-checklist"}} {{ctx.Locale.Tr "repo.issues.backlog"}}
-					</a>
-				{{end}}
-
-				{{if .Permission.CanRead ctx.Consts.RepoUnitTypeExternalTracker}}
-					<a class="{{if .PageIsIssueList}}active {{end}}item" href="{{.RepoExternalIssuesLink}}" target="_blank">
-						{{svg "octicon-link-external"}} {{ctx.Locale.Tr "repo.issues"}}
-					</a>
-				{{end}}
-
-				{{if and .Repository.CanEnablePulls (.Permission.CanRead ctx.Consts.RepoUnitTypePullRequests)}}
-					<a class="{{if .PageIsPullList}}active {{end}}item" href="{{.RepoLink}}/pulls">
-						{{svg "octicon-git-pull-request"}} {{ctx.Locale.Tr "repo.pulls"}}
-						{{if .Repository.NumOpenPulls}}
-							<span class="ui small label">{{CountFmt .Repository.NumOpenPulls}}</span>
-						{{end}}
-					</a>
-				{{end}}
-
-				{{if and .EnableActions (.Permission.CanRead ctx.Consts.RepoUnitTypeActions) (not .IsEmptyRepo)}}
-					<a class="{{if .PageIsActions}}active {{end}}item" href="{{.RepoLink}}/actions">
-						{{svg "octicon-play"}} {{ctx.Locale.Tr "actions.actions"}}
-						{{if .Repository.NumOpenActionRuns}}
-						<span class="ui small label">{{CountFmt .Repository.NumOpenActionRuns}}</span>
 					{{end}}
-				</a>
-			{{end}}
 
-			{{if .Permission.CanRead ctx.Consts.RepoUnitTypePackages}}
-				<a href="{{.RepoLink}}/packages" class="{{if .IsPackagesPage}}active {{end}}item">
-					{{svg "octicon-package"}} {{ctx.Locale.Tr "packages.title"}}
-				</a>
+					{{if .Permission.CanRead ctx.Consts.RepoUnitTypeExternalTracker}}
+						<a class="{{if .PageIsIssueList}}active {{end}}item" href="{{.RepoExternalIssuesLink}}" target="_blank">
+							{{svg "octicon-link-external"}} {{ctx.Locale.Tr "repo.issues"}}
+						</a>
+					{{end}}
+
+					{{if and .Repository.CanEnablePulls (.Permission.CanRead ctx.Consts.RepoUnitTypePullRequests)}}
+						<a class="{{if .PageIsPullList}}active {{end}}item" href="{{.RepoLink}}/pulls">
+							{{svg "octicon-git-pull-request"}} {{ctx.Locale.Tr "repo.pulls"}}
+							{{if .Repository.NumOpenPulls}}
+								<span class="ui small label">{{CountFmt .Repository.NumOpenPulls}}</span>
+							{{end}}
+						</a>
+					{{end}}
+
+					{{if and .EnableActions (.Permission.CanRead ctx.Consts.RepoUnitTypeActions) (not .IsEmptyRepo)}}
+						<a class="{{if .PageIsActions}}active {{end}}item" href="{{.RepoLink}}/actions">
+							{{svg "octicon-play"}} {{ctx.Locale.Tr "actions.actions"}}
+							{{if .Repository.NumOpenActionRuns}}
+								<span class="ui small label">{{CountFmt .Repository.NumOpenActionRuns}}</span>
+							{{end}}
+						</a>
+					{{end}}
+
+					{{if .Permission.CanRead ctx.Consts.RepoUnitTypePackages}}
+						<a href="{{.RepoLink}}/packages" class="{{if .IsPackagesPage}}active {{end}}item">
+							{{svg "octicon-package"}} {{ctx.Locale.Tr "packages.title"}}
+						</a>
+					{{end}}
+
+					{{$projectsUnit := .Repository.MustGetUnit ctx ctx.Consts.RepoUnitTypeProjects}}
+					{{if and (not ctx.Consts.RepoUnitTypeProjects.UnitGlobalDisabled) (.Permission.CanRead ctx.Consts.RepoUnitTypeProjects) ($projectsUnit.ProjectsConfig.IsProjectsAllowed "repo")}}
+						<a href="{{.RepoLink}}/projects" class="{{if .IsProjectsPage}}active {{end}}item">
 							{{svg "octicon-project"}} {{ctx.Locale.Tr "repo.projects"}}
 							{{if .Repository.NumOpenProjects}}
 								<span class="ui small label">{{CountFmt .Repository.NumOpenProjects}}</span>

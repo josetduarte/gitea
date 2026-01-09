@@ -148,7 +148,6 @@ func (n *IssueNode) FilterTree(labelIDs []int64, assigneeID int64, milestoneID i
 // Backlog shows the backlog view with tree hierarchy by dependencies
 func Backlog(ctx *context.Context) {
 	ctx.Data["Title"] = ctx.Tr("repo.issues.backlog")
-	ctx.Data["PageIsIssueList"] = true
 	ctx.Data["PageIsBacklog"] = true
 
 	// Get filter parameters
