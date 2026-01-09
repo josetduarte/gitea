@@ -121,9 +121,21 @@
 
 {{/* Subtemplate for tree node */}}
 {{define "repo/issue/backlog_node"}}
-<div class="issue-node" style="margin-left: {{Eval .Level "*" 30}}px;">
+<div class="issue-node" style="margin-left: {{Eval .Level "*" 30}}px;" data-issue-id="{{.Issue.ID}}">
 	<div class="ui segment" style="margin-bottom: 0.5rem;">
 		<div class="tw-flex tw-items-start tw-gap-3">
+			{{/* Expand/Collapse Toggle */}}
+			{{if .Children}}
+				<button class="issue-toggle tw-flex-shrink-0 tw-p-0 tw-border-0 tw-bg-transparent tw-cursor-pointer" 
+					data-issue-id="{{.Issue.ID}}" 
+					aria-label="Toggle children" 
+					style="width: 16px; height: 16px;">
+					<span class="toggle-icon">{{svg "octicon-chevron-down" 16}}</span>
+				</button>
+			{{else}}
+				<span style="width: 16px;"></span>
+			{{end}}
+
 			{{/* Issue Icon & Number */}}
 			<div class="tw-flex tw-items-center tw-gap-2">
 				{{if .Issue.IsClosed}}
@@ -188,11 +200,142 @@
 
 	{{/* Render children */}}
 	{{if .Children}}
-		{{range .Children}}
-			{{template "repo/issue/backlog_node" .}}
-		{{end}}
+		<div class="issue-children" data-parent-id="{{.Issue.ID}}">
+			{{range .Children}}
+				{{template "repo/issue/backlog_node" .}}
+			{{end}}
+		</div>
 	{{end}}
 </div>
 {{end}}
+
+<style>
+.issue-toggle {
+	transition: transform 0.2s ease;
+	outline: none;
+}
+
+.issue-toggle:hover {
+	opacity: 0.7;
+}
+
+.issue-toggle.collapsed .toggle-icon {
+	transform: rotate(-90deg);
+	display: inline-block;
+}
+
+.issue-children {
+	transition: max-height 0.3s ease, opacity 0.3s ease;
+	overflow: hidden;
+}
+
+.issue-children.collapsed {
+	max-height: 0 !important;
+	opacity: 0;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+	const STORAGE_KEY = 'gitea-backlog-collapsed';
+	
+	// Load collapsed state from localStorage
+	let collapsedIssues = new Set();
+	try {
+		const stored = localStorage.getItem(STORAGE_KEY);
+		if (stored) {
+			collapsedIssues = new Set(JSON.parse(stored));
+		}
+	} catch (e) {
+		console.error('Failed to load collapsed state:', e);
+	}
+	
+	// Apply initial collapsed state
+	collapsedIssues.forEach(issueId => {
+		const toggle = document.querySelector(`.issue-toggle[data-issue-id="${issueId}"]`);
+		const children = document.querySelector(`.issue-children[data-parent-id="${issueId}"]`);
+		if (toggle && children) {
+			toggle.classList.add('collapsed');
+			children.classList.add('collapsed');
+		}
+	});
+	
+	// Handle toggle clicks
+	document.querySelectorAll('.issue-toggle').forEach(toggle => {
+		toggle.addEventListener('click', function(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			
+			const issueId = this.dataset.issueId;
+			const children = document.querySelector(`.issue-children[data-parent-id="${issueId}"]`);
+			
+			if (!children) return;
+			
+			const isCollapsed = this.classList.contains('collapsed');
+			
+			if (isCollapsed) {
+				// Expand
+				this.classList.remove('collapsed');
+				children.classList.remove('collapsed');
+				collapsedIssues.delete(issueId);
+			} else {
+				// Collapse
+				this.classList.add('collapsed');
+				children.classList.add('collapsed');
+				collapsedIssues.add(issueId);
+			}
+			
+			// Save state to localStorage
+			try {
+				localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsedIssues]));
+			} catch (e) {
+				console.error('Failed to save collapsed state:', e);
+			}
+		});
+	});
+	
+	// Add expand/collapse all buttons
+	const issueTree = document.querySelector('.issue-tree');
+	if (issueTree && document.querySelectorAll('.issue-toggle').length > 0) {
+		const toolbar = document.createElement('div');
+		toolbar.className = 'tw-flex tw-gap-2 tw-mb-3';
+		toolbar.innerHTML = `
+			<button class="ui mini basic button" id="expand-all">
+				${window.svg('octicon-unfold')} Expand All
+			</button>
+			<button class="ui mini basic button" id="collapse-all">
+				${window.svg('octicon-fold')} Collapse All
+			</button>
+		`;
+		issueTree.insertBefore(toolbar, issueTree.firstChild);
+		
+		document.getElementById('expand-all').addEventListener('click', function() {
+			document.querySelectorAll('.issue-toggle').forEach(toggle => {
+				const issueId = toggle.dataset.issueId;
+				const children = document.querySelector(`.issue-children[data-parent-id="${issueId}"]`);
+				if (children) {
+					toggle.classList.remove('collapsed');
+					children.classList.remove('collapsed');
+					collapsedIssues.delete(issueId);
+				}
+			});
+			localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsedIssues]));
+		});
+		
+		document.getElementById('collapse-all').addEventListener('click', function() {
+			document.querySelectorAll('.issue-toggle').forEach(toggle => {
+				const issueId = toggle.dataset.issueId;
+				const children = document.querySelector(`.issue-children[data-parent-id="${issueId}"]`);
+				if (children) {
+					toggle.classList.add('collapsed');
+					children.classList.add('collapsed');
+					collapsedIssues.add(issueId);
+				}
+			});
+			localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsedIssues]));
+		});
+	}
+});
+</script>
 
 {{template "base/footer" .}}
