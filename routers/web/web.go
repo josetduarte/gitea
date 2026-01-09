@@ -1225,6 +1225,7 @@ func registerWebRoutes(m *web.Router) {
 		m.Get("/labels", repo.RetrieveLabelsForList, repo.Labels)
 		m.Get("/milestones", repo.Milestones)
 		m.Get("/milestone/{id}", repo.MilestoneIssuesAndPulls)
+		m.Get("/backlog", repo.Backlog)
 		m.Get("/issues/suggestions", repo.IssueSuggestions)
 	}, optSignIn, context.RepoAssignment, reqRepoIssuesOrPullsReader) // issue/pull attachments, labels, milestones
 	// end "/{username}/{reponame}": view milestone, label, issue, pull, etc

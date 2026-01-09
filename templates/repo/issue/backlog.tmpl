@@ -1,0 +1,198 @@
+{{template "base/head" .}}
+<div class="page-content repository">
+	{{template "repo/header" .}}
+	<div class="ui container">
+		<div class="repo-button-row">
+			<div class="tw-flex tw-items-center tw-justify-between tw-flex-wrap">
+				<h2 class="tw-mb-0">{{ctx.Locale.Tr "repo.issues.backlog"}}</h2>
+				<div class="tw-flex tw-gap-2">
+					{{if .CanWriteIssues}}
+						<a class="ui small primary button" href="{{.RepoLink}}/issues/new">{{ctx.Locale.Tr "repo.issues.new"}}</a>
+					{{end}}
+				</div>
+			</div>
+		</div>
+
+		{{/* Statistics Bar */}}
+		{{if .IssueStats}}
+		<div class="ui attached segment tw-flex tw-gap-6 tw-mb-0">
+			<div class="tw-flex tw-items-center tw-gap-2">
+				<span>{{ctx.Locale.Tr "repo.issues.open_tab"}}</span>
+				<strong>{{.IssueStats.Total}}</strong>
+			</div>
+			<div class="tw-flex tw-items-center tw-gap-2">
+				<span>{{ctx.Locale.Tr "repo.issues.backlog.no_milestone"}}</span>
+				<strong>{{.IssueStats.NoMilestone}}</strong>
+			</div>
+			<div class="tw-flex tw-items-center tw-gap-2">
+				<span>{{ctx.Locale.Tr "repo.issues.backlog.with_dependencies"}}</span>
+				<strong>{{.IssueStats.WithDependencies}}</strong>
+			</div>
+		</div>
+		{{end}}
+
+		{{/* Filter Bar */}}
+		<div class="ui attached segment tw-flex tw-gap-2 tw-mb-0" style="border-top: none;">
+			{{/* Milestone Filter */}}
+			{{$queryLink := QueryBuild "?" "milestone" .MilestoneID}}
+			<div class="item ui dropdown jump {{if not (or .OpenMilestones .ClosedMilestones)}}disabled{{end}}">
+				<span class="text">
+					{{svg "octicon-milestone" 16 "tw-mr-1"}}
+					<strong>{{ctx.Locale.Tr "repo.issues.filter_milestone"}}</strong>
+					{{if eq .MilestoneID -1}}
+						: {{ctx.Locale.Tr "repo.issues.filter_milestone_none"}}
+					{{else if .MilestoneID}}
+						{{range .OpenMilestones}}{{if eq $.MilestoneID .ID}}: {{.Name}}{{end}}{{end}}
+						{{range .ClosedMilestones}}{{if eq $.MilestoneID .ID}}: {{.Name}}{{end}}{{end}}
+					{{else}}
+						: {{ctx.Locale.Tr "repo.issues.filter_milestone_all"}}
+					{{end}}
+				</span>
+				{{svg "octicon-triangle-down" 14 "dropdown icon"}}
+				<div class="menu">
+					<div class="ui icon search input">
+						<i class="icon">{{svg "octicon-search" 16}}</i>
+						<input type="text" placeholder="{{ctx.Locale.Tr "repo.issues.filter_milestone"}}">
+					</div>
+					<div class="divider"></div>
+					<a class="{{if not $.MilestoneID}}active selected {{end}}item" href="{{QueryBuild $queryLink "milestone" NIL}}">
+						{{ctx.Locale.Tr "repo.issues.filter_milestone_all"}}
+					</a>
+					<a class="{{if eq $.MilestoneID -1}}active selected {{end}}item" href="{{QueryBuild $queryLink "milestone" -1}}">
+						{{ctx.Locale.Tr "repo.issues.filter_milestone_none"}}
+					</a>
+					{{if .OpenMilestones}}
+						<div class="divider"></div>
+						<div class="header">{{ctx.Locale.Tr "repo.issues.filter_milestone_open"}}</div>
+						{{range .OpenMilestones}}
+							<a class="{{if eq $.MilestoneID .ID}}active selected {{end}}item" href="{{QueryBuild $queryLink "milestone" .ID}}">
+								{{svg "octicon-milestone" 16 "tw-mr-2"}}
+								{{.Name}}
+							</a>
+						{{end}}
+					{{end}}
+					{{if .ClosedMilestones}}
+						<div class="divider"></div>
+						<div class="header">{{ctx.Locale.Tr "repo.issues.filter_milestone_closed"}}</div>
+						{{range .ClosedMilestones}}
+							<a class="{{if eq $.MilestoneID .ID}}active selected {{end}}item" href="{{QueryBuild $queryLink "milestone" .ID}}">
+								{{svg "octicon-milestone" 16 "tw-mr-2"}}
+								{{.Name}}
+							</a>
+						{{end}}
+					{{end}}
+				</div>
+			</div>
+		</div>
+
+		{{/* Issue Tree */}}
+		{{if .IssueTree}}
+			<div class="ui attached segment" style="border-top: none;">
+				<div class="issue-tree">
+					{{range .IssueTree}}
+						{{template "repo/issue/backlog_node" .}}
+					{{end}}
+				</div>
+			</div>
+		{{else}}
+			<div class="ui attached segment" style="border-top: none;">
+				<div class="ui center aligned segment">
+					{{svg "octicon-checklist" 48}}
+					<p>{{ctx.Locale.Tr "repo.issues.backlog.no_issues"}}</p>
+					{{if .CanWriteIssues}}
+						<a class="ui primary button" href="{{.RepoLink}}/issues/new">{{ctx.Locale.Tr "repo.issues.new"}}</a>
+					{{end}}
+				</div>
+			</div>
+		{{end}}
+
+		{{/* Help Section */}}
+		<div class="ui info message tw-mt-4">
+			<div class="header">{{ctx.Locale.Tr "repo.issues.backlog.help_title"}}</div>
+			<p>{{ctx.Locale.Tr "repo.issues.backlog.help_content"}}</p>
+			<ul class="list">
+				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_hierarchy"}}</li>
+				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_dependencies"}}</li>
+				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_milestones"}}</li>
+			</ul>
+		</div>
+	</div>
+</div>
+
+{{/* Subtemplate for tree node */}}
+{{define "repo/issue/backlog_node"}}
+<div class="issue-node" style="margin-left: {{Eval .Level "*" 30}}px;">
+	<div class="ui segment" style="margin-bottom: 0.5rem;">
+		<div class="tw-flex tw-items-start tw-gap-3">
+			{{/* Issue Icon & Number */}}
+			<div class="tw-flex tw-items-center tw-gap-2">
+				{{if .Issue.IsClosed}}
+					{{svg "octicon-issue-closed" 16}}
+				{{else}}
+					{{svg "octicon-issue-opened" 16}}
+				{{end}}
+				<span>#{{.Issue.Index}}</span>
+			</div>
+
+			{{/* Issue Content */}}
+			<div class="tw-flex-1">
+				<div class="tw-mb-2">
+					<a href="{{.Issue.Link}}">{{.Issue.Title}}</a>
+				</div>
+
+				{{/* Metadata */}}
+				<div class="tw-flex tw-flex-wrap tw-items-center tw-gap-3 tw-text-sm">
+					{{if .Issue.Milestone}}
+						<span class="tw-flex tw-items-center tw-gap-1">
+							{{svg "octicon-milestone" 14}}
+							{{.Issue.Milestone.Name}}
+						</span>
+					{{end}}
+
+					{{if .Issue.Labels}}
+						<span class="tw-flex tw-items-center tw-gap-1">
+							{{range .Issue.Labels}}
+								<span class="ui label" style="background-color: {{.Color}}; color: {{ContrastColor .Color}};">
+									{{.Name}}
+								</span>
+							{{end}}
+						</span>
+					{{end}}
+
+					{{if .Issue.Assignees}}
+						<span class="tw-flex tw-items-center tw-gap-1">
+							{{svg "octicon-person" 14}}
+							{{range .Issue.Assignees}}
+								<a href="{{.HomeLink}}">{{ctx.AvatarUtils.Avatar . 20}}</a>
+							{{end}}
+						</span>
+					{{end}}
+
+					{{if .Children}}
+						<span class="tw-flex tw-items-center tw-gap-1">
+							{{svg "octicon-git-branch" 14}}
+							{{len .Children}} {{ctx.Locale.Tr "repo.issues.backlog.child_issues"}}
+						</span>
+					{{end}}
+
+					{{if .Issue.NumComments}}
+						<span class="tw-flex tw-items-center tw-gap-1">
+							{{svg "octicon-comment" 14}}
+							{{.Issue.NumComments}}
+						</span>
+					{{end}}
+				</div>
+			</div>
+		</div>
+	</div>
+
+	{{/* Render children */}}
+	{{if .Children}}
+		{{range .Children}}
+			{{template "repo/issue/backlog_node" .}}
+		{{end}}
+	{{end}}
+</div>
+{{end}}
+
+{{template "base/footer" .}}
