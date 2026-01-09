@@ -3,13 +3,11 @@
 	{{template "repo/header" .}}
 	<div class="ui container">
 		<div class="repo-button-row">
-			<div class="tw-flex tw-items-center tw-justify-between tw-flex-wrap">
+			<div class="tw-flex tw-items-center tw-justify-between tw-flex-wrap tw-w-full">
 				<h2 class="tw-mb-0">{{ctx.Locale.Tr "repo.issues.backlog"}}</h2>
-				<div class="tw-flex tw-gap-2">
-					{{if .CanWriteIssues}}
-						<a class="ui small primary button" href="{{.RepoLink}}/issues/new">{{ctx.Locale.Tr "repo.issues.new"}}</a>
-					{{end}}
-				</div>
+				{{if .CanWriteIssues}}
+					<a class="ui small primary button" href="{{.RepoLink}}/issues/new">{{ctx.Locale.Tr "repo.issues.new"}}</a>
+				{{end}}
 			</div>
 		</div>
 
@@ -105,97 +103,97 @@
 				</div>
 			</div>
 		{{end}}
-
-		{{/* Help Section */}}
-		<div class="ui info message tw-mt-4">
-			<div class="header">{{ctx.Locale.Tr "repo.issues.backlog.help_title"}}</div>
-			<p>{{ctx.Locale.Tr "repo.issues.backlog.help_content"}}</p>
-			<ul class="list">
-				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_hierarchy"}}</li>
-				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_dependencies"}}</li>
-				<li>{{ctx.Locale.Tr "repo.issues.backlog.help_milestones"}}</li>
-			</ul>
-		</div>
 	</div>
 </div>
 
 {{/* Subtemplate for tree node */}}
 {{define "repo/issue/backlog_node"}}
 <div class="issue-node" style="margin-left: {{Eval .Level "*" 30}}px;" data-issue-id="{{.Issue.ID}}">
-	<div class="ui segment" style="margin-bottom: 0.5rem;">
-		<div class="tw-flex tw-items-start tw-gap-3">
-			{{/* Expand/Collapse Toggle */}}
-			{{if .Children}}
-				<button class="issue-toggle tw-flex-shrink-0 tw-p-0 tw-border-0 tw-bg-transparent tw-cursor-pointer" 
-					data-issue-id="{{.Issue.ID}}" 
-					aria-label="Toggle children" 
-					style="width: 16px; height: 16px;">
-					<span class="toggle-icon">{{svg "octicon-chevron-down" 16}}</span>
-				</button>
-			{{else}}
-				<span style="width: 16px;"></span>
+	<div class="issue-card" style="margin-bottom: 0.5rem; position: relative;">
+		{{/* Expand/Collapse Toggle */}}
+		{{if .Children}}
+			<button class="issue-toggle tw-flex-shrink-0 tw-p-1 tw-border-0 tw-bg-transparent tw-cursor-pointer" 
+				data-issue-id="{{.Issue.ID}}" 
+				aria-label="Toggle children" 
+				style="position: absolute; left: 4px; top: 4px; z-index: 1;">
+				<span class="toggle-icon">{{svg "octicon-chevron-down" 16}}</span>
+			</button>
+		{{end}}
+		
+		<div class="content tw-w-full" style="{{if .Children}}padding-left: 24px;{{end}}">
+			<div class="tw-flex tw-items-start tw-gap-[5px]">
+				<div class="issue-card-icon">
+					{{template "shared/issueicon" .Issue}}
+				</div>
+				<a class="issue-card-title muted issue-title tw-break-anywhere" href="{{.Issue.Link}}">{{.Issue.Title | ctx.RenderUtils.RenderIssueSimpleTitle}}</a>
+			</div>
+			<div class="meta">
+				<span class="text light grey muted-links">
+					#{{.Issue.Index}}
+					{{$timeStr := DateUtils.TimeSince .Issue.GetLastEventTimestamp}}
+					{{if .Issue.OriginalAuthor}}
+						{{ctx.Locale.Tr .Issue.GetLastEventLabelFake $timeStr .Issue.OriginalAuthor}}
+					{{else if gt .Issue.Poster.ID 0}}
+						{{ctx.Locale.Tr .Issue.GetLastEventLabel $timeStr .Issue.Poster.HomeLink .Issue.Poster.GetDisplayName}}
+					{{else}}
+						{{ctx.Locale.Tr .Issue.GetLastEventLabelFake $timeStr .Issue.Poster.GetDisplayName}}
+					{{end}}
+				</span>
+			</div>
+			{{if .Issue.MilestoneID}}
+			<div class="meta tw-my-1">
+				<a class="milestone" href="{{.Issue.Repo.Link}}/milestone/{{.Issue.MilestoneID}}">
+					{{svg "octicon-milestone" 16 "tw-mr-1 tw-align-middle"}}
+					<span class="tw-align-middle">{{.Issue.Milestone.Name}}</span>
+				</a>
+			</div>
 			{{end}}
-
-			{{/* Issue Icon & Number */}}
-			<div class="tw-flex tw-items-center tw-gap-2">
-				{{if .Issue.IsClosed}}
-					{{svg "octicon-issue-closed" 16}}
-				{{else}}
-					{{svg "octicon-issue-opened" 16}}
+			{{if .Children}}
+			<div class="meta tw-my-1">
+				{{$openCount := 0}}
+				{{$closedCount := 0}}
+				{{range .Children}}
+					{{if .Issue.IsClosed}}
+						{{$closedCount = Eval $closedCount "+" 1}}
+					{{else}}
+						{{$openCount = Eval $openCount "+" 1}}
+					{{end}}
 				{{end}}
-				<span>#{{.Issue.Index}}</span>
+				{{svg "octicon-issue-opened" 14 "tw-mr-1 tw-align-middle"}}
+				<span class="tw-align-middle">{{$openCount}} {{ctx.Locale.Tr "repo.issues.open_title"}}</span>
+				<span class="tw-mx-1">·</span>
+				{{svg "octicon-check" 14 "tw-mr-1 tw-align-middle"}}
+				<span class="tw-align-middle">{{$closedCount}} {{ctx.Locale.Tr "repo.issues.closed_title"}}</span>
 			</div>
-
-			{{/* Issue Content */}}
-			<div class="tw-flex-1">
-				<div class="tw-mb-2">
-					<a href="{{.Issue.Link}}">{{.Issue.Title}}</a>
+			{{end}}
+			{{$tasks := .Issue.GetTasks}}
+			{{if gt $tasks 0}}
+				<div class="meta tw-my-1">
+					{{svg "octicon-checklist" 16 "tw-mr-1 tw-align-middle"}}
+					<span class="tw-align-middle">{{.Issue.GetTasksDone}} / {{$tasks}}</span>
 				</div>
-
-				{{/* Metadata */}}
-				<div class="tw-flex tw-flex-wrap tw-items-center tw-gap-3 tw-text-sm">
-					{{if .Issue.Milestone}}
-						<span class="tw-flex tw-items-center tw-gap-1">
-							{{svg "octicon-milestone" 14}}
-							{{.Issue.Milestone.Name}}
-						</span>
-					{{end}}
-
-					{{if .Issue.Labels}}
-						<span class="tw-flex tw-items-center tw-gap-1">
-							{{range .Issue.Labels}}
-								<span class="ui label" style="background-color: {{.Color}}; color: {{ContrastColor .Color}};">
-									{{.Name}}
-								</span>
-							{{end}}
-						</span>
-					{{end}}
-
-					{{if .Issue.Assignees}}
-						<span class="tw-flex tw-items-center tw-gap-1">
-							{{svg "octicon-person" 14}}
-							{{range .Issue.Assignees}}
-								<a href="{{.HomeLink}}">{{ctx.AvatarUtils.Avatar . 20}}</a>
-							{{end}}
-						</span>
-					{{end}}
-
-					{{if .Children}}
-						<span class="tw-flex tw-items-center tw-gap-1">
-							{{svg "octicon-git-branch" 14}}
-							{{len .Children}} {{ctx.Locale.Tr "repo.issues.backlog.child_issues"}}
-						</span>
-					{{end}}
-
-					{{if .Issue.NumComments}}
-						<span class="tw-flex tw-items-center tw-gap-1">
-							{{svg "octicon-comment" 14}}
-							{{.Issue.NumComments}}
-						</span>
-					{{end}}
-				</div>
-			</div>
+			{{end}}
 		</div>
+
+		{{if or .Issue.Labels .Issue.Assignees}}
+		<div class="issue-card-bottom">
+			{{/* the labels container must always be present, to help the assignees list right-aligned */}}
+			<div class="issue-card-bottom-part labels-list">
+				{{range $label := .Issue.Labels}}
+					{{$link := print .Issue.Repo.Link "/issues"}}
+					{{$link = QueryBuild $link "labels" $label.ID}}
+					{{ctx.RenderUtils.RenderLabelWithLink $label $link}}
+				{{end}}
+			</div>
+			{{if .Issue.Assignees}}
+			<div class="issue-card-bottom-part tw-justify-end">
+				{{range .Issue.Assignees}}
+					<a target="_blank" href="{{.HomeLink}}" data-tooltip-content="{{ctx.Locale.Tr "repo.projects.column.assigned_to"}} {{.Name}}">{{ctx.AvatarUtils.Avatar . 24}}</a>
+				{{end}}
+			</div>
+			{{end}}
+		</div>
+		{{end}}
 	</div>
 
 	{{/* Render children */}}
@@ -210,6 +208,10 @@
 {{end}}
 
 <style>
+.issue-node {
+	position: relative;
+}
+
 .issue-toggle {
 	transition: transform 0.2s ease;
 	outline: none;
@@ -238,7 +240,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
 	const STORAGE_KEY = 'gitea-backlog-collapsed';
-	
+
 	// Load collapsed state from localStorage
 	let collapsedIssues = new Set();
 	try {
@@ -249,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
 	} catch (e) {
 		console.error('Failed to load collapsed state:', e);
 	}
-	
+
 	// Apply initial collapsed state
 	collapsedIssues.forEach(issueId => {
 		const toggle = document.querySelector(`.issue-toggle[data-issue-id="${issueId}"]`);
@@ -259,20 +261,20 @@ document.addEventListener('DOMContentLoaded', function() {
 			children.classList.add('collapsed');
 		}
 	});
-	
+
 	// Handle toggle clicks
 	document.querySelectorAll('.issue-toggle').forEach(toggle => {
 		toggle.addEventListener('click', function(e) {
 			e.preventDefault();
 			e.stopPropagation();
-			
+
 			const issueId = this.dataset.issueId;
 			const children = document.querySelector(`.issue-children[data-parent-id="${issueId}"]`);
-			
+
 			if (!children) return;
-			
+
 			const isCollapsed = this.classList.contains('collapsed');
-			
+
 			if (isCollapsed) {
 				// Expand
 				this.classList.remove('collapsed');
@@ -284,7 +286,7 @@ document.addEventListener('DOMContentLoaded', function() {
 				children.classList.add('collapsed');
 				collapsedIssues.add(issueId);
 			}
-			
+
 			// Save state to localStorage
 			try {
 				localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsedIssues]));
@@ -293,7 +295,7 @@ document.addEventListener('DOMContentLoaded', function() {
 			}
 		});
 	});
-	
+
 	// Add expand/collapse all buttons
 	const issueTree = document.querySelector('.issue-tree');
 	if (issueTree && document.querySelectorAll('.issue-toggle').length > 0) {
@@ -308,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
 			</button>
 		`;
 		issueTree.insertBefore(toolbar, issueTree.firstChild);
-		
+
 		document.getElementById('expand-all').addEventListener('click', function() {
 			document.querySelectorAll('.issue-toggle').forEach(toggle => {
 				const issueId = toggle.dataset.issueId;
@@ -321,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function() {
 			});
 			localStorage.setItem(STORAGE_KEY, JSON.stringify([...collapsedIssues]));
 		});
-		
+
 		document.getElementById('collapse-all').addEventListener('click', function() {
 			document.querySelectorAll('.issue-toggle').forEach(toggle => {
 				const issueId = toggle.dataset.issueId;
