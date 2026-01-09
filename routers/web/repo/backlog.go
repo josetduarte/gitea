@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	tplBacklog templates.TplName = "repo/issue/backlog"
+	tplBacklog templates.TplName = "repo/backlog/view"
 )
 
 // IssueNode represents an issue in a tree hierarchy
