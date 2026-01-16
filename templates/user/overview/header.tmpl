@@ -19,6 +19,9 @@
 			{{end}}
 		</a>
 		{{end}}
+		<a href="{{.ContextUser.HomeLink}}/-/backlog" class="{{if .PageIsBacklog}}active {{end}}item">
+			{{svg "octicon-checklist"}} {{ctx.Locale.Tr "repo.issues.backlog"}}
+		</a>
 		{{if and .IsPackageEnabled (or .ContextUser.IsIndividual .CanReadPackages)}}
 			<a href="{{.ContextUser.HomeLink}}/-/packages" class="{{if .IsPackagesPage}}active {{end}}item">
 				{{svg "octicon-package"}} {{ctx.Locale.Tr "packages.title"}}

@@ -291,14 +291,19 @@ document.addEventListener('DOMContentLoaded', function() {
 	if (issueTree && document.querySelectorAll('.issue-toggle').length > 0) {
 		const toolbar = document.createElement('div');
 		toolbar.className = 'tw-flex tw-gap-2 tw-mb-3';
-		toolbar.innerHTML = `
-			<button class="ui mini basic button" id="expand-all">
-				${window.svg('octicon-unfold')} Expand All
-			</button>
-			<button class="ui mini basic button" id="collapse-all">
-				${window.svg('octicon-fold')} Collapse All
-			</button>
-		`;
+		
+		const expandBtn = document.createElement('button');
+		expandBtn.className = 'ui mini basic button';
+		expandBtn.id = 'expand-all';
+		expandBtn.innerHTML = '{{svg "octicon-unfold"}} Expand All';
+		
+		const collapseBtn = document.createElement('button');
+		collapseBtn.className = 'ui mini basic button';
+		collapseBtn.id = 'collapse-all';
+		collapseBtn.innerHTML = '{{svg "octicon-fold"}} Collapse All';
+		
+		toolbar.appendChild(expandBtn);
+		toolbar.appendChild(collapseBtn);
 		issueTree.insertBefore(toolbar, issueTree.firstChild);
 
 		document.getElementById('expand-all').addEventListener('click', function() {
