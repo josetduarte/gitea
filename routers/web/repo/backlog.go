@@ -230,7 +230,7 @@ func Backlog(ctx *context.Context) {
 	isChild := make(map[int64]bool)
 	for _, issue := range issues {
 		// Get issues this issue depends on (blocked by)
-		blockedBy, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
+		blockedBy, _, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
 		if err == nil {
 			for _, dep := range blockedBy {
 				// Mark the dependencies as children
@@ -294,7 +294,7 @@ func buildIssueTree(ctx *context.Context, issue *issues_model.Issue, issueMap ma
 
 	// Get issues that this issue depends on (blocked by)
 	// This issue is the parent, the issues it depends on are shown as children
-	blockedBy, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
+	blockedBy, _, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
 	if err == nil {
 		for _, dep := range blockedBy {
 			if childIssue, exists := issueMap[dep.Issue.ID]; exists {
