@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"code.gitea.io/gitea/modules/git/gitcmd"
 	"code.gitea.io/gitea/modules/log"
@@ -22,7 +21,7 @@ import (
 	"github.com/hashicorp/go-version"
 )
 
-const RequiredVersion = "2.0.0" // the minimum Git version required
+const RequiredVersion = "2.6.0" // the minimum Git version required
 
 type Features struct {
 	gitVersion *version.Version
@@ -33,6 +32,7 @@ type Features struct {
 	SupportedObjectFormats     []ObjectFormat // sha1, sha256
 	SupportCheckAttrOnBare     bool           // >= 2.40
 	SupportCatFileBatchCommand bool           // >= 2.36, support `git cat-file --batch-command`
+	SupportGitMergeTree        bool           // >= 2.40 // we also need "--merge-base"
 }
 
 var defaultFeatures *Features
@@ -78,6 +78,7 @@ func loadGitVersionFeatures() (*Features, error) {
 	}
 	features.SupportCheckAttrOnBare = features.CheckVersionAtLeast("2.40")
 	features.SupportCatFileBatchCommand = features.CheckVersionAtLeast("2.36")
+	features.SupportGitMergeTree = features.CheckVersionAtLeast("2.40") // we also need "--merge-base"
 	return features, nil
 }
 
@@ -87,12 +88,17 @@ func parseGitVersionLine(s string) (*version.Version, error) {
 		return nil, fmt.Errorf("invalid git version: %q", s)
 	}
 
-	// version string is like: "git version 2.29.3" or "git version 2.29.3.windows.1"
+	// version output is like: "git version {versionString}"
+	// versionString can be:
+	// * "2.5.3"
+	// * "2.29.3.windows.1"
+	// * "2.28.0.618.gf4bc123cb7": https://github.com/go-gitea/gitea/issues/12731
 	versionString := fields[2]
-	if pos := strings.Index(versionString, "windows"); pos >= 1 {
-		versionString = versionString[:pos-1]
+	versionFields := strings.Split(versionString, ".")
+	if len(versionFields) > 3 {
+		versionFields = versionFields[:3]
 	}
-	return version.NewVersion(versionString)
+	return version.NewVersion(strings.Join(versionFields, "."))
 }
 
 func checkGitVersionCompatibility(gitVer *version.Version) error {
@@ -138,10 +144,6 @@ func InitSimple() error {
 
 	if defaultFeatures != nil && (!setting.IsProd || setting.IsInTesting) {
 		log.Warn("git module has been initialized already, duplicate init may work but it's better to fix it")
-	}
-
-	if setting.Git.Timeout.Default > 0 {
-		gitcmd.SetDefaultCommandExecutionTimeout(time.Duration(setting.Git.Timeout.Default) * time.Second)
 	}
 
 	if err := gitcmd.SetExecutablePath(setting.Git.Path); err != nil {

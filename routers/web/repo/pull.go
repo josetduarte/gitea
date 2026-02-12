@@ -23,6 +23,7 @@ import (
 	repo_model "code.gitea.io/gitea/models/repo"
 	"code.gitea.io/gitea/models/unit"
 	user_model "code.gitea.io/gitea/models/user"
+	"code.gitea.io/gitea/modules/commitstatus"
 	"code.gitea.io/gitea/modules/emoji"
 	"code.gitea.io/gitea/modules/fileicon"
 	"code.gitea.io/gitea/modules/git"
@@ -35,6 +36,7 @@ import (
 	"code.gitea.io/gitea/modules/optional"
 	"code.gitea.io/gitea/modules/setting"
 	"code.gitea.io/gitea/modules/templates"
+	"code.gitea.io/gitea/modules/translation"
 	"code.gitea.io/gitea/modules/util"
 	"code.gitea.io/gitea/modules/web"
 	"code.gitea.io/gitea/routers/utils"
@@ -237,7 +239,7 @@ func GetMergedBaseCommitID(ctx *context.Context, issue *issues_model.Issue) stri
 		}
 		if commitSHA != "" {
 			// Get immediate parent of the first commit in the patch, grab history back
-			parentCommit, err = gitrepo.RunCmdString(ctx, ctx.Repo.Repository,
+			parentCommit, _, err = gitrepo.RunCmdString(ctx, ctx.Repo.Repository,
 				gitcmd.NewCommand("rev-list", "-1", "--skip=1").AddDynamicArguments(commitSHA))
 			if err == nil {
 				parentCommit = strings.TrimSpace(parentCommit)
@@ -320,6 +322,55 @@ type pullCommitStatusCheckData struct {
 	RequireApprovalRunCount int               // number of workflow runs that require approval
 	CanApprove              bool              // whether the user can approve workflow runs
 	ApproveLink             string            // link to approve all checks
+	RequiredChecksState     commitstatus.CommitStatusState
+	LatestCommitStatus      *git_model.CommitStatus
+}
+
+func (d *pullCommitStatusCheckData) CommitStatusCheckPrompt(locale translation.Locale) string {
+	if d.RequiredChecksState.IsPending() || len(d.MissingRequiredChecks) > 0 {
+		return locale.TrString("repo.pulls.status_checking")
+	} else if d.RequiredChecksState.IsSuccess() {
+		if d.LatestCommitStatus != nil && d.LatestCommitStatus.State.IsFailure() {
+			return locale.TrString("repo.pulls.status_checks_failure_optional")
+		}
+		return locale.TrString("repo.pulls.status_checks_success")
+	} else if d.RequiredChecksState.IsWarning() {
+		return locale.TrString("repo.pulls.status_checks_warning")
+	} else if d.RequiredChecksState.IsFailure() {
+		return locale.TrString("repo.pulls.status_checks_failure_required")
+	} else if d.RequiredChecksState.IsError() {
+		return locale.TrString("repo.pulls.status_checks_error")
+	}
+	return locale.TrString("repo.pulls.status_checking")
+}
+
+func getViewPullHeadBranchInfo(ctx *context.Context, pull *issues_model.PullRequest, baseGitRepo *git.Repository) (headCommitID string, headCommitExists bool, err error) {
+	if pull.HeadRepo == nil {
+		return "", false, nil
+	}
+	headGitRepo, closer, err := gitrepo.RepositoryFromContextOrOpen(ctx, pull.HeadRepo)
+	if err != nil {
+		return "", false, util.Iif(errors.Is(err, util.ErrNotExist), nil, err)
+	}
+	defer closer.Close()
+
+	if pull.Flow == issues_model.PullRequestFlowGithub {
+		headCommitExists, _ = git_model.IsBranchExist(ctx, pull.HeadRepo.ID, pull.HeadBranch)
+	} else {
+		headCommitExists = gitrepo.IsReferenceExist(ctx, pull.BaseRepo, pull.GetGitHeadRefName())
+	}
+
+	if headCommitExists {
+		if pull.Flow != issues_model.PullRequestFlowGithub {
+			headCommitID, err = baseGitRepo.GetRefCommitID(pull.GetGitHeadRefName())
+		} else {
+			headCommitID, err = headGitRepo.GetBranchCommitID(pull.HeadBranch)
+		}
+		if err != nil {
+			return "", false, util.Iif(errors.Is(err, util.ErrNotExist), nil, err)
+		}
+	}
+	return headCommitID, headCommitExists, nil
 }
 
 // prepareViewPullInfo show meta information for a pull request preview page
@@ -360,6 +411,8 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 		defer baseGitRepo.Close()
 	}
 
+	statusCheckData := &pullCommitStatusCheckData{}
+
 	if exist, _ := git_model.IsBranchExist(ctx, pull.BaseRepo.ID, pull.BaseBranch); !exist {
 		ctx.Data["BaseBranchNotExist"] = true
 		ctx.Data["IsPullRequestBroken"] = true
@@ -380,9 +433,10 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 			git_model.CommitStatusesHideActionsURL(ctx, commitStatuses)
 		}
 
+		statusCheckData.LatestCommitStatus = git_model.CalcCommitStatus(commitStatuses)
 		if len(commitStatuses) > 0 {
 			ctx.Data["LatestCommitStatuses"] = commitStatuses
-			ctx.Data["LatestCommitStatus"] = git_model.CalcCommitStatus(commitStatuses)
+			ctx.Data["LatestCommitStatus"] = statusCheckData.LatestCommitStatus
 		}
 
 		compareInfo, err := git_service.GetCompareInfo(ctx, pull.BaseRepo, pull.BaseRepo, baseGitRepo,
@@ -405,34 +459,10 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 		return compareInfo
 	}
 
-	var headBranchExist bool
-	var headBranchSha string
-	// HeadRepo may be missing
-	if pull.HeadRepo != nil {
-		headGitRepo, closer, err := gitrepo.RepositoryFromContextOrOpen(ctx, pull.HeadRepo)
-		if err != nil {
-			ctx.ServerError("RepositoryFromContextOrOpen", err)
-			return nil
-		}
-		defer closer.Close()
-
-		if pull.Flow == issues_model.PullRequestFlowGithub {
-			headBranchExist, _ = git_model.IsBranchExist(ctx, pull.HeadRepo.ID, pull.HeadBranch)
-		} else {
-			headBranchExist = gitrepo.IsReferenceExist(ctx, pull.BaseRepo, pull.GetGitHeadRefName())
-		}
-
-		if headBranchExist {
-			if pull.Flow != issues_model.PullRequestFlowGithub {
-				headBranchSha, err = baseGitRepo.GetRefCommitID(pull.GetGitHeadRefName())
-			} else {
-				headBranchSha, err = headGitRepo.GetBranchCommitID(pull.HeadBranch)
-			}
-			if err != nil {
-				ctx.ServerError("GetBranchCommitID", err)
-				return nil
-			}
-		}
+	headBranchSha, headBranchExist, err := getViewPullHeadBranchInfo(ctx, pull, baseGitRepo)
+	if err != nil {
+		ctx.ServerError("getViewPullHeadBranchInfo", err)
+		return nil
 	}
 
 	if headBranchExist {
@@ -467,10 +497,8 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 		return nil
 	}
 
-	statusCheckData := &pullCommitStatusCheckData{
-		ApproveLink: fmt.Sprintf("%s/actions/approve-all-checks?commit_id=%s", repo.Link(), sha),
-	}
 	ctx.Data["StatusCheckData"] = statusCheckData
+	statusCheckData.ApproveLink = fmt.Sprintf("%s/actions/approve-all-checks?commit_id=%s", repo.Link(), sha)
 
 	commitStatuses, err := git_model.GetLatestCommitStatus(ctx, repo.ID, sha, db.ListOptionsAll)
 	if err != nil {
@@ -495,9 +523,10 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 		statusCheckData.CanApprove = ctx.Repo.CanWrite(unit.TypeActions)
 	}
 
+	statusCheckData.LatestCommitStatus = git_model.CalcCommitStatus(commitStatuses)
 	if len(commitStatuses) > 0 {
 		ctx.Data["LatestCommitStatuses"] = commitStatuses
-		ctx.Data["LatestCommitStatus"] = git_model.CalcCommitStatus(commitStatuses)
+		ctx.Data["LatestCommitStatus"] = statusCheckData.LatestCommitStatus
 	}
 
 	if pb != nil && pb.EnableStatusCheck {
@@ -534,7 +563,7 @@ func prepareViewPullInfo(ctx *context.Context, issue *issues_model.Issue) *git_s
 			}
 			return false
 		}
-		ctx.Data["RequiredStatusCheckState"] = pull_service.MergeRequiredContextsCommitStatus(commitStatuses, pb.StatusCheckContexts)
+		statusCheckData.RequiredChecksState = pull_service.MergeRequiredContextsCommitStatus(commitStatuses, pb.StatusCheckContexts)
 	}
 
 	ctx.Data["HeadBranchMovedOn"] = headBranchSha != sha
@@ -1263,6 +1292,28 @@ func CancelAutoMergePullRequest(ctx *context.Context) {
 	issue, ok := getPullInfo(ctx)
 	if !ok {
 		return
+	}
+
+	exist, autoMerge, err := pull_model.GetScheduledMergeByPullID(ctx, issue.PullRequest.ID)
+	if err != nil {
+		ctx.ServerError("GetScheduledMergeByPullID", err)
+		return
+	}
+	if !exist {
+		ctx.NotFound(nil)
+		return
+	}
+
+	if ctx.Doer.ID != autoMerge.DoerID {
+		allowed, err := pull_service.IsUserAllowedToMerge(ctx, issue.PullRequest, ctx.Repo.Permission, ctx.Doer)
+		if err != nil {
+			ctx.ServerError("IsUserAllowedToMerge", err)
+			return
+		}
+		if !allowed {
+			ctx.HTTPError(http.StatusForbidden, "user has no permission to cancel the scheduled auto merge")
+			return
+		}
 	}
 
 	if err := automerge.RemoveScheduledAutoMerge(ctx, ctx.Doer, issue.PullRequest); err != nil {
