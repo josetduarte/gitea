@@ -15,7 +15,7 @@
 			<h2>{{ctx.Locale.Tr "repo.issues.backlog"}}</h2>
 			<div class="tw-flex-1"></div>
 			<div class="ui secondary menu tw-m-0">
-				{{$queryLink := QueryBuild "?" "labels" .SelectLabels "assignee" $.AssigneeID "milestone" $.MilestoneID}}
+				{{$queryLink := QueryBuild "?" "state" $.State "labels" .SelectLabels "assignee" $.AssigneeID "milestone" $.MilestoneID}}
 				{{template "repo/issue/filter_item_label" dict "Labels" .Labels "QueryLink" $queryLink}}
 				{{template "repo/issue/filter_item_user_assign" dict
 					"QueryParamKey" "assignee"
@@ -65,6 +65,23 @@
 			</div>
 		</div>
 		<div class="divider"></div>
+
+		{{/* Open/Closed State Tabs */}}
+		{{$stateLink := QueryBuild "?" "labels" .SelectLabels "assignee" $.AssigneeID "milestone" $.MilestoneID}}
+		<div class="ui container tw-flex tw-gap-4 tw-mb-4">
+			<a class="{{if eq $.State "open"}}active {{end}}item" href="{{QueryBuild $stateLink "state" "open"}}">
+				{{svg "octicon-issue-opened" 16 "tw-mr-1"}}
+				{{$.OpenCount}} {{ctx.Locale.Tr "repo.issues.open_title"}}
+			</a>
+			<a class="{{if eq $.State "closed"}}active {{end}}item" href="{{QueryBuild $stateLink "state" "closed"}}">
+				{{svg "octicon-check" 16 "tw-mr-1"}}
+				{{$.ClosedCount}} {{ctx.Locale.Tr "repo.issues.closed_title"}}
+			</a>
+			<a class="{{if eq $.State "all"}}active {{end}}item" href="{{QueryBuild $stateLink "state" "all"}}">
+				{{svg "octicon-list-unordered" 16 "tw-mr-1"}}
+				{{ctx.Locale.Tr "repo.issues.filter_type.all_issues"}}
+			</a>
+		</div>
 
 		{{/* Statistics Bar */}}
 		{{if .IssueStats}}
@@ -292,17 +309,17 @@ document.addEventListener('DOMContentLoaded', function() {
 	if (issueTree && document.querySelectorAll('.issue-toggle').length > 0) {
 		const toolbar = document.createElement('div');
 		toolbar.className = 'tw-flex tw-gap-2 tw-mb-3';
-		
+
 		const expandBtn = document.createElement('button');
 		expandBtn.className = 'ui mini basic button';
 		expandBtn.id = 'expand-all';
 		expandBtn.innerHTML = '{{svg "octicon-unfold"}} Expand All';
-		
+
 		const collapseBtn = document.createElement('button');
 		collapseBtn.className = 'ui mini basic button';
 		collapseBtn.id = 'collapse-all';
 		collapseBtn.innerHTML = '{{svg "octicon-fold"}} Collapse All';
-		
+
 		toolbar.appendChild(expandBtn);
 		toolbar.appendChild(collapseBtn);
 		issueTree.insertBefore(toolbar, issueTree.firstChild);

@@ -151,6 +151,11 @@ func Backlog(ctx *context.Context) {
 	ctx.Data["PageIsBacklog"] = true
 
 	// Get filter parameters
+	state := ctx.FormString("state")
+	if state == "" {
+		state = "open"
+	}
+	ctx.Data["State"] = state
 	milestoneID := ctx.FormInt64("milestone")
 	assigneeID := ctx.FormString("assignee")
 
@@ -193,15 +198,22 @@ func Backlog(ctx *context.Context) {
 	ctx.Data["ClosedMilestones"] = closedMilestones
 	ctx.Data["MilestoneID"] = milestoneID
 
-	// Build issue options - get ALL open issues (milestone filtering done via tree pruning)
+	// Build issue options - filter by state
 	issueOpts := &issues_model.IssuesOptions{
 		RepoIDs:  []int64{ctx.Repo.Repository.ID},
 		IsPull:   optional.Some(false),
-		IsClosed: optional.Some(false),
 		SortType: "priority",
 	}
+	switch state {
+	case "closed":
+		issueOpts.IsClosed = optional.Some(true)
+	case "all":
+		// no IsClosed filter — fetch both open and closed
+	default:
+		issueOpts.IsClosed = optional.Some(false)
+	}
 
-	// Get all open issues
+	// Get issues
 	issues, err := issues_model.Issues(ctx, issueOpts)
 	if err != nil {
 		ctx.ServerError("Issues", err)
@@ -302,6 +314,20 @@ func Backlog(ctx *context.Context) {
 
 	// Statistics
 	ctx.Data["IssueStats"] = getBacklogStats(ctx, ctx.Repo.Repository.ID)
+
+	// Open/Closed counts for the tab switcher
+	openCount, _ := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
+		RepoIDs:  []int64{ctx.Repo.Repository.ID},
+		IsPull:   optional.Some(false),
+		IsClosed: optional.Some(false),
+	}, nil)
+	closedCount, _ := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
+		RepoIDs:  []int64{ctx.Repo.Repository.ID},
+		IsPull:   optional.Some(false),
+		IsClosed: optional.Some(true),
+	}, nil)
+	ctx.Data["OpenCount"] = openCount
+	ctx.Data["ClosedCount"] = closedCount
 
 	ctx.HTML(http.StatusOK, tplBacklog)
 }
