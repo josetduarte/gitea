@@ -1,0 +1,41 @@
+.issue-tree .issue-node {
+  position: relative;
+  padding-left: calc(var(--indent-level, 0) * 30px);
+}
+
+.issue-tree .issue-card {
+  margin-bottom: 0.5rem;
+  position: relative;
+}
+
+.issue-tree .issue-card .issue-card-has-children {
+  padding-left: 24px;
+}
+
+.issue-tree .issue-toggle {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  z-index: 1;
+  transition: transform 0.2s ease;
+  outline: none;
+}
+
+.issue-tree .issue-toggle:hover {
+  opacity: 0.7;
+}
+
+.issue-tree .issue-toggle.collapsed .toggle-icon {
+  transform: rotate(-90deg);
+  display: inline-block;
+}
+
+.issue-tree .issue-children {
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
+}
+
+.issue-tree .issue-children.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+}

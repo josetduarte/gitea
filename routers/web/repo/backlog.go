@@ -4,13 +4,18 @@
 package repo
 
 import (
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	"code.gitea.io/gitea/models/db"
 	issues_model "code.gitea.io/gitea/models/issues"
 	repo_model "code.gitea.io/gitea/models/repo"
+	"code.gitea.io/gitea/modules/log"
 	"code.gitea.io/gitea/modules/optional"
+	"code.gitea.io/gitea/modules/setting"
 	"code.gitea.io/gitea/modules/templates"
 	"code.gitea.io/gitea/routers/web/shared/issue"
 	shared_user "code.gitea.io/gitea/routers/web/shared/user"
@@ -23,44 +28,55 @@ const (
 
 // IssueNode represents an issue in a tree hierarchy
 type IssueNode struct {
-	Issue    *issues_model.Issue
-	Children []*IssueNode
-	Level    int
+	Issue             *issues_model.Issue
+	Children          []*IssueNode
+	Level             int
+	OpenDescendants   int
+	ClosedDescendants int
 }
 
-// CountOpenDescendants recursively counts all open descendant issues
-func (n *IssueNode) CountOpenDescendants() int {
+// countOpenDescendants recursively counts all open descendant issues
+func (n *IssueNode) countOpenDescendants() int {
 	count := 0
 	for _, child := range n.Children {
 		if !child.Issue.IsClosed {
 			count++
 		}
-		count += child.CountOpenDescendants()
+		count += child.countOpenDescendants()
 	}
 	return count
 }
 
-// CountClosedDescendants recursively counts all closed descendant issues
-func (n *IssueNode) CountClosedDescendants() int {
+// countClosedDescendants recursively counts all closed descendant issues
+func (n *IssueNode) countClosedDescendants() int {
 	count := 0
 	for _, child := range n.Children {
 		if child.Issue.IsClosed {
 			count++
 		}
-		count += child.CountClosedDescendants()
+		count += child.countClosedDescendants()
 	}
 	return count
 }
 
+// ComputeDescendantCounts precomputes open/closed descendant counts for this node and all children
+func (n *IssueNode) ComputeDescendantCounts() {
+	n.OpenDescendants = n.countOpenDescendants()
+	n.ClosedDescendants = n.countClosedDescendants()
+	for _, child := range n.Children {
+		child.ComputeDescendantCounts()
+	}
+}
+
 // MatchesFilter checks if this node or any of its descendants match the filter criteria
-func (n *IssueNode) MatchesFilter(labelIDs []int64, assigneeID int64, milestoneID int64) bool {
+func (n *IssueNode) MatchesFilter(state string, labelIDs []int64, assigneeID, milestoneID int64) bool {
 	// Check if this node matches
-	if nodeMatchesFilter(n.Issue, labelIDs, assigneeID, milestoneID) {
+	if nodeMatchesFilter(n.Issue, state, labelIDs, assigneeID, milestoneID) {
 		return true
 	}
 	// Check if any descendant matches
 	for _, child := range n.Children {
-		if child.MatchesFilter(labelIDs, assigneeID, milestoneID) {
+		if child.MatchesFilter(state, labelIDs, assigneeID, milestoneID) {
 			return true
 		}
 	}
@@ -68,8 +84,21 @@ func (n *IssueNode) MatchesFilter(labelIDs []int64, assigneeID int64, milestoneI
 }
 
 // nodeMatchesFilter checks if an issue matches the filter criteria
-func nodeMatchesFilter(issue *issues_model.Issue, labelIDs []int64, assigneeID int64, milestoneID int64) bool {
-	// If no filters, everything matches
+func nodeMatchesFilter(issue *issues_model.Issue, state string, labelIDs []int64, assigneeID, milestoneID int64) bool {
+	// Check state filter
+	switch state {
+	case "open":
+		if issue.IsClosed {
+			return false
+		}
+	case "closed":
+		if !issue.IsClosed {
+			return false
+		}
+		// "all" or empty: no state filtering
+	}
+
+	// If no other filters, match
 	if len(labelIDs) == 0 && assigneeID == 0 && milestoneID == 0 {
 		return true
 	}
@@ -124,20 +153,23 @@ func nodeMatchesFilter(issue *issues_model.Issue, labelIDs []int64, assigneeID i
 	return true
 }
 
-// FilterTree filters the tree to only include nodes that match the filter or have matching descendants
-func (n *IssueNode) FilterTree(labelIDs []int64, assigneeID int64, milestoneID int64) *IssueNode {
-	if !n.MatchesFilter(labelIDs, assigneeID, milestoneID) {
+// FilterTree filters the tree to only include nodes that match the filter or have matching descendants.
+// It preserves precomputed descendant counts from the original tree.
+func (n *IssueNode) FilterTree(state string, labelIDs []int64, assigneeID, milestoneID int64) *IssueNode {
+	if !n.MatchesFilter(state, labelIDs, assigneeID, milestoneID) {
 		return nil
 	}
 
-	// Create new node with filtered children
+	// Create new node with filtered children, preserving precomputed counts
 	filteredNode := &IssueNode{
-		Issue: n.Issue,
-		Level: n.Level,
+		Issue:             n.Issue,
+		Level:             n.Level,
+		OpenDescendants:   n.OpenDescendants,
+		ClosedDescendants: n.ClosedDescendants,
 	}
 
 	for _, child := range n.Children {
-		if filteredChild := child.FilterTree(labelIDs, assigneeID, milestoneID); filteredChild != nil {
+		if filteredChild := child.FilterTree(state, labelIDs, assigneeID, milestoneID); filteredChild != nil {
 			filteredNode.Children = append(filteredNode.Children, filteredChild)
 		}
 	}
@@ -156,6 +188,35 @@ func Backlog(ctx *context.Context) {
 		state = "open"
 	}
 	ctx.Data["State"] = state
+
+	page := ctx.FormInt("page")
+	if page <= 0 {
+		page = 1
+	}
+
+	// Sort type
+	sortType := ctx.FormString("sort")
+	if sortType == "" {
+		sortType = "latest"
+	}
+	ctx.Data["SortType"] = sortType
+
+	// View type (all, assigned, created_by, mentioned)
+	viewType := ctx.FormString("type")
+	validTypes := []string{"all", "assigned", "created_by", "mentioned"}
+	if !isValidViewType(viewType, validTypes) {
+		viewType = "all"
+	}
+	ctx.Data["ViewType"] = viewType
+
+	// Keyword search
+	keyword := strings.TrimSpace(ctx.FormString("q"))
+	ctx.Data["Keyword"] = keyword
+
+	// Poster filter
+	posterUsername := ctx.FormString("poster")
+	ctx.Data["PosterUsername"] = posterUsername
+
 	milestoneID := ctx.FormInt64("milestone")
 	assigneeID := ctx.FormString("assignee")
 
@@ -176,6 +237,19 @@ func Backlog(ctx *context.Context) {
 
 	// Parse assigneeID as int64 for filtering
 	assigneeIDInt, _ := strconv.ParseInt(assigneeID, 10, 64)
+
+	// Apply view type overrides when signed in
+	if ctx.IsSigned {
+		switch viewType {
+		case "created_by":
+			// will be handled below
+		case "mentioned":
+			// will be handled below
+		case "assigned":
+			assigneeID = strconv.FormatInt(ctx.Doer.ID, 10)
+			assigneeIDInt = ctx.Doer.ID
+		}
+	}
 
 	// Get all milestones for the filter dropdown
 	milestones, err := db.Find[issues_model.Milestone](ctx, issues_model.FindMilestoneOptions{
@@ -198,20 +272,32 @@ func Backlog(ctx *context.Context) {
 	ctx.Data["ClosedMilestones"] = closedMilestones
 	ctx.Data["MilestoneID"] = milestoneID
 
-	// Build issue options - filter by state
+	// Build issue options - fetch ALL issues (open+closed) so the tree can be built
+	// State filtering is applied at the tree level, same as labels
 	issueOpts := &issues_model.IssuesOptions{
 		RepoIDs:  []int64{ctx.Repo.Repository.ID},
 		IsPull:   optional.Some(false),
-		SortType: "priority",
+		SortType: sortType,
+		Paginator: &db.ListOptions{
+			Page:     page,
+			PageSize: setting.UI.IssuePagingNum,
+		},
 	}
-	switch state {
-	case "closed":
-		issueOpts.IsClosed = optional.Some(true)
-	case "all":
-		// no IsClosed filter — fetch both open and closed
-	default:
-		issueOpts.IsClosed = optional.Some(false)
+
+	// Apply view type filters to issue options
+	if ctx.IsSigned {
+		switch viewType {
+		case "created_by":
+			issueOpts.PosterID = strconv.FormatInt(ctx.Doer.ID, 10)
+		case "mentioned":
+			issueOpts.MentionedID = ctx.Doer.ID
+		case "assigned":
+			issueOpts.AssigneeID = assigneeID
+		}
 	}
+
+	// Keyword is passed through for the search form display
+	// Full-text search requires the issue indexer which is handled separately
 
 	// Get issues
 	issues, err := issues_model.Issues(ctx, issueOpts)
@@ -221,7 +307,7 @@ func Backlog(ctx *context.Context) {
 	}
 
 	// Batch-load only the attributes needed for the backlog view
-	issueList := issues_model.IssueList(issues)
+	issueList := issues
 	if _, err := issueList.LoadRepositories(ctx); err != nil {
 		ctx.ServerError("LoadRepositories", err)
 		return
@@ -299,35 +385,79 @@ func Backlog(ctx *context.Context) {
 		}
 	}
 
-	// Filter tree based on milestone, label and assignee filters
-	if milestoneID != 0 || len(labelFilter.SelectedLabelIDs) > 0 || assigneeIDInt != 0 {
-		filteredTree := make([]*IssueNode, 0)
-		for _, node := range tree {
-			if filteredNode := node.FilterTree(labelFilter.SelectedLabelIDs, assigneeIDInt, milestoneID); filteredNode != nil {
-				filteredTree = append(filteredTree, filteredNode)
-			}
-		}
-		tree = filteredTree
+	// Precompute descendant counts on the full tree before any filtering
+	for _, node := range tree {
+		node.ComputeDescendantCounts()
 	}
+
+	// Filter tree based on state, milestone, label and assignee filters
+	// State is filtered at the tree level (like labels) to preserve tree hierarchy
+	filteredTree := make([]*IssueNode, 0)
+	for _, node := range tree {
+		if filteredNode := node.FilterTree(state, labelFilter.SelectedLabelIDs, assigneeIDInt, milestoneID); filteredNode != nil {
+			filteredTree = append(filteredTree, filteredNode)
+		}
+	}
+	tree = filteredTree
 
 	ctx.Data["IssueTree"] = tree
 
-	// Statistics
-	ctx.Data["IssueStats"] = getBacklogStats(ctx, ctx.Repo.Repository.ID)
+	// Open/Closed counts for the tab switcher — apply active filters so counts are accurate
+	countOpts := &issues_model.IssuesOptions{
+		RepoIDs: []int64{ctx.Repo.Repository.ID},
+		IsPull:  optional.Some(false),
+	}
+	if len(labelFilter.SelectedLabelIDs) > 0 {
+		countOpts.LabelIDs = labelFilter.SelectedLabelIDs
+	}
+	if milestoneID != 0 {
+		if milestoneID == -1 {
+			countOpts.MilestoneIDs = []int64{db.NoConditionID}
+		} else {
+			countOpts.MilestoneIDs = []int64{milestoneID}
+		}
+	}
+	if assigneeIDInt != 0 {
+		countOpts.AssigneeID = assigneeID
+	}
+	if ctx.IsSigned {
+		switch viewType {
+		case "created_by":
+			countOpts.PosterID = strconv.FormatInt(ctx.Doer.ID, 10)
+		case "mentioned":
+			countOpts.MentionedID = ctx.Doer.ID
+		case "assigned":
+			countOpts.AssigneeID = strconv.FormatInt(ctx.Doer.ID, 10)
+		}
+	}
 
-	// Open/Closed counts for the tab switcher
-	openCount, _ := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
-		RepoIDs:  []int64{ctx.Repo.Repository.ID},
-		IsPull:   optional.Some(false),
-		IsClosed: optional.Some(false),
-	}, nil)
-	closedCount, _ := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
-		RepoIDs:  []int64{ctx.Repo.Repository.ID},
-		IsPull:   optional.Some(false),
-		IsClosed: optional.Some(true),
-	}, nil)
+	openCountOpts := *countOpts
+	openCountOpts.IsClosed = optional.Some(false)
+	openCount, err := issues_model.CountIssues(ctx, &openCountOpts)
+	if err != nil {
+		log.Error("CountIssues for open: %v", err)
+	}
+	closedCountOpts := *countOpts
+	closedCountOpts.IsClosed = optional.Some(true)
+	closedCount, err := issues_model.CountIssues(ctx, &closedCountOpts)
+	if err != nil {
+		log.Error("CountIssues for closed: %v", err)
+	}
 	ctx.Data["OpenCount"] = openCount
 	ctx.Data["ClosedCount"] = closedCount
+
+	// Pagination
+	totalCount := openCount + closedCount
+	switch state {
+	case "open":
+		totalCount = openCount
+	case "closed":
+		totalCount = closedCount
+	}
+
+	pager := context.NewPagination(int(totalCount), setting.UI.IssuePagingNum, page, 5)
+	pager.AddParamFromRequest(ctx.Req)
+	ctx.Data["Page"] = pager
 
 	ctx.HTML(http.StatusOK, tplBacklog)
 }
@@ -350,11 +480,11 @@ func buildIssueTree(issue *issues_model.Issue, issueMap map[int64]*issues_model.
 	// Use pre-fetched dependency map instead of per-node DB queries
 	for _, depID := range depsByIssueID[issue.ID] {
 		if childIssue, exists := issueMap[depID]; exists {
-			// Create a new visited map for each child to allow multiple parent paths
-			childVisited := make(map[int64]bool)
-			for k, v := range visited {
-				childVisited[k] = v
-			}
+			// Copy the visited map for each child so that siblings in a DAG
+			// (issues depended on by multiple parents) can each appear in the tree.
+			childVisited := make(map[int64]bool, len(visited))
+			maps.Copy(childVisited, visited)
+
 			childNode := buildIssueTree(childIssue, issueMap, depsByIssueID, childVisited, level+1)
 			if childNode != nil {
 				node.Children = append(node.Children, childNode)
@@ -365,42 +495,7 @@ func buildIssueTree(issue *issues_model.Issue, issueMap map[int64]*issues_model.
 	return node
 }
 
-// getBacklogStats returns statistics for the backlog
-func getBacklogStats(ctx *context.Context, repoID int64) map[string]int64 {
-	stats := make(map[string]int64)
-
-	// Count total open issues
-	total, err := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
-		RepoIDs:  []int64{repoID},
-		IsPull:   optional.Some(false),
-		IsClosed: optional.Some(false),
-	}, nil)
-	if err == nil {
-		stats["Total"] = total
-	}
-
-	// Count issues without milestone
-	noMilestone, err := issues_model.CountIssues(ctx, &issues_model.IssuesOptions{
-		RepoIDs:      []int64{repoID},
-		IsPull:       optional.Some(false),
-		IsClosed:     optional.Some(false),
-		MilestoneIDs: []int64{db.NoConditionID},
-	}, nil)
-	if err == nil {
-		stats["NoMilestone"] = noMilestone
-	}
-
-	// Count issues with dependencies
-	var withDeps int64
-	_, err = db.GetEngine(ctx).
-		Table("issue").
-		Join("INNER", "issue_dependency", "issue_dependency.issue_id = issue.id OR issue_dependency.dependency_id = issue.id").
-		Where("issue.repo_id = ? AND issue.is_closed = ? AND issue.is_pull = ?", repoID, false, false).
-		Distinct("issue.id").
-		Count(&withDeps)
-	if err == nil {
-		stats["WithDependencies"] = withDeps
-	}
-
-	return stats
+// isValidViewType checks if the given viewType is in the list of valid types
+func isValidViewType(viewType string, validTypes []string) bool {
+	return slices.Contains(validTypes, viewType)
 }

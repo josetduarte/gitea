@@ -8,6 +8,7 @@ import {initRepoGraphGit} from './features/repo-graph.ts';
 import {initHeatmap} from './features/heatmap.ts';
 import {initImageDiff} from './features/imagediff.ts';
 import {initRepoMigration} from './features/repo-migration.ts';
+import {initRepoBacklog} from './features/repo-backlog.ts';
 import {initRepoProject} from './features/repo-projects.ts';
 import {initTableSort} from './features/tablesort.ts';
 import {initAdminUserListSearchForm} from './features/admin/users.ts';
@@ -130,6 +131,7 @@ const initPerformanceTracer = callInitFunctions([
   initRepoIssueSidebarDependency,
   initRepoMigration,
   initRepoMigrationStatusChecker,
+  initRepoBacklog,
   initRepoProject,
   initRepoPullRequestAllowMaintainerEdit,
   initRepoPullRequestReview,

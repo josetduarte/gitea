@@ -1393,6 +1393,8 @@
   "repo.issues.backlog.no_milestone": "No Milestone",
   "repo.issues.backlog.with_dependencies": "With Dependencies",
   "repo.issues.backlog.no_issues": "No issues in backlog",
+  "repo.issues.backlog.expand_all": "Expand All",
+  "repo.issues.backlog.collapse_all": "Collapse All",
   "repo.issues.filter_assignees": "Filter Assignee",
   "repo.issues.filter_milestones": "Filter Milestone",
   "repo.issues.filter_projects": "Filter Project",

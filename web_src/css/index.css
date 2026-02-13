@@ -43,6 +43,7 @@
 @import "./features/expander.css";
 @import "./features/cropper.css";
 @import "./features/console.css";
+@import "./features/backlog.css";
 @import "./features/captcha.css";
 
 @import "./markup/content.css";
