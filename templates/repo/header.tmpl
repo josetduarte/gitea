@@ -145,9 +145,11 @@
 							{{if .Repository.NumOpenIssues}}
 								<span class="ui small label">{{CountFmt .Repository.NumOpenIssues}}</span>
 							{{end}}
-						</a>					<a class="{{if .PageIsBacklog}}active {{end}}item" href="{{.RepoLink}}/backlog">
-						{{svg "octicon-checklist"}} {{ctx.Locale.Tr "repo.issues.backlog"}}
-					</a>					{{end}}
+						</a>
+						<a class="{{if .PageIsBacklog}}active {{end}}item" href="{{.RepoLink}}/backlog">
+							{{svg "octicon-checklist"}} {{ctx.Locale.Tr "repo.issues.backlog"}}
+						</a>
+					{{end}}
 
 					{{if .Permission.CanRead ctx.Consts.RepoUnitTypeExternalTracker}}
 						<a class="{{if .PageIsIssueList}}active {{end}}item" href="{{.RepoExternalIssuesLink}}" target="_blank">

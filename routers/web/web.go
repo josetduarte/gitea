@@ -1025,8 +1025,6 @@ func registerWebRoutes(m *web.Router) {
 
 		m.Get("/repositories", org.Repositories)
 
-		// m.Get("/backlog", org.Backlog) // Temporarily disabled
-
 		m.Group("/projects", func() {
 			m.Group("", func() {
 				m.Get("", org.Projects)

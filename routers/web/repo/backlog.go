@@ -159,7 +159,6 @@ func Backlog(ctx *context.Context) {
 	if ctx.Written() {
 		return
 	}
-	ctx.Data["SelLabelIDs"] = labelFilter.SelectedLabelIDs
 
 	// Get assignees for the filter dropdown
 	assigneeUsers, err := repo_model.GetRepoAssignees(ctx, ctx.Repo.Repository)
@@ -209,39 +208,69 @@ func Backlog(ctx *context.Context) {
 		return
 	}
 
-	// Load attributes for all issues
-	for _, issue := range issues {
-		if err := issue.LoadAttributes(ctx); err != nil {
-			ctx.ServerError("LoadAttributes", err)
-			return
-		}
+	// Batch-load only the attributes needed for the backlog view
+	issueList := issues_model.IssueList(issues)
+	if _, err := issueList.LoadRepositories(ctx); err != nil {
+		ctx.ServerError("LoadRepositories", err)
+		return
+	}
+	if err := issueList.LoadPosters(ctx); err != nil {
+		ctx.ServerError("LoadPosters", err)
+		return
+	}
+	if err := issueList.LoadLabels(ctx); err != nil {
+		ctx.ServerError("LoadLabels", err)
+		return
+	}
+	if err := issueList.LoadMilestones(ctx); err != nil {
+		ctx.ServerError("LoadMilestones", err)
+		return
+	}
+	if err := issueList.LoadAssignees(ctx); err != nil {
+		ctx.ServerError("LoadAssignees", err)
+		return
 	}
 
-	// Build issue tree based on dependencies
-	// Create issue map for quick lookup
+	// Build issue map for quick lookup
 	issueMap := make(map[int64]*issues_model.Issue)
 	for _, issue := range issues {
 		issueMap[issue.ID] = issue
 	}
 
-	// Find root issues (parent issues that depend on others)
-	// Root = issues that are NOT dependencies of other issues
-	// If issue A depends on issue B, then A is parent (root) and B is child (dependency)
-	isChild := make(map[int64]bool)
+	// Pre-fetch all dependencies in a single query to avoid N+1 queries
+	// depsByIssueID maps issue_id -> list of dependency_ids (issues it depends on / is blocked by)
+	issueIDs := make([]int64, 0, len(issues))
 	for _, issue := range issues {
-		// Get issues this issue depends on (blocked by)
-		blockedBy, _, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
-		if err == nil {
-			for _, dep := range blockedBy {
-				// Mark the dependencies as children
-				if _, exists := issueMap[dep.Issue.ID]; exists {
-					isChild[dep.Issue.ID] = true
-				}
+		issueIDs = append(issueIDs, issue.ID)
+	}
+
+	depsByIssueID := make(map[int64][]int64)
+	if len(issueIDs) > 0 {
+		var deps []issues_model.IssueDependency
+		err = db.GetEngine(ctx).
+			In("issue_id", issueIDs).
+			Find(&deps)
+		if err != nil {
+			ctx.ServerError("FindDependencies", err)
+			return
+		}
+		for _, dep := range deps {
+			depsByIssueID[dep.IssueID] = append(depsByIssueID[dep.IssueID], dep.DependencyID)
+		}
+	}
+
+	// Find root issues (issues that are NOT dependencies of other issues)
+	// If issue A depends on issue B, then A is parent (root) and B is child
+	isChild := make(map[int64]bool)
+	for _, depIDs := range depsByIssueID {
+		for _, depID := range depIDs {
+			if _, exists := issueMap[depID]; exists {
+				isChild[depID] = true
 			}
 		}
 	}
 
-	// Root issues are those not marked as children (issues that depend on things, or standalone)
+	// Root issues are those not marked as children
 	rootIssues := make([]*issues_model.Issue, 0)
 	for _, issue := range issues {
 		if !isChild[issue.ID] {
@@ -249,10 +278,10 @@ func Backlog(ctx *context.Context) {
 		}
 	}
 
-	// Build tree recursively (allow issues to appear under multiple parents)
+	// Build tree recursively using pre-fetched dependencies
 	tree := make([]*IssueNode, 0)
 	for _, issue := range rootIssues {
-		node := buildIssueTree(ctx, issue, issueMap, make(map[int64]bool), 0)
+		node := buildIssueTree(issue, issueMap, depsByIssueID, make(map[int64]bool), 0)
 		if node != nil {
 			tree = append(tree, node)
 		}
@@ -279,7 +308,7 @@ func Backlog(ctx *context.Context) {
 
 // buildIssueTree recursively builds a tree where parents depend on children
 // An issue that depends on others is the parent, the dependencies are children
-func buildIssueTree(ctx *context.Context, issue *issues_model.Issue, issueMap map[int64]*issues_model.Issue, visited map[int64]bool, level int) *IssueNode {
+func buildIssueTree(issue *issues_model.Issue, issueMap map[int64]*issues_model.Issue, depsByIssueID map[int64][]int64, visited map[int64]bool, level int) *IssueNode {
 	// Prevent infinite recursion
 	if visited[issue.ID] {
 		return nil
@@ -292,21 +321,17 @@ func buildIssueTree(ctx *context.Context, issue *issues_model.Issue, issueMap ma
 		Level:    level,
 	}
 
-	// Get issues that this issue depends on (blocked by)
-	// This issue is the parent, the issues it depends on are shown as children
-	blockedBy, _, err := issue.BlockedByDependencies(ctx, db.ListOptions{})
-	if err == nil {
-		for _, dep := range blockedBy {
-			if childIssue, exists := issueMap[dep.Issue.ID]; exists {
-				// Create a new visited map for each child to allow multiple parent paths
-				childVisited := make(map[int64]bool)
-				for k, v := range visited {
-					childVisited[k] = v
-				}
-				childNode := buildIssueTree(ctx, childIssue, issueMap, childVisited, level+1)
-				if childNode != nil {
-					node.Children = append(node.Children, childNode)
-				}
+	// Use pre-fetched dependency map instead of per-node DB queries
+	for _, depID := range depsByIssueID[issue.ID] {
+		if childIssue, exists := issueMap[depID]; exists {
+			// Create a new visited map for each child to allow multiple parent paths
+			childVisited := make(map[int64]bool)
+			for k, v := range visited {
+				childVisited[k] = v
+			}
+			childNode := buildIssueTree(childIssue, issueMap, depsByIssueID, childVisited, level+1)
+			if childNode != nil {
+				node.Children = append(node.Children, childNode)
 			}
 		}
 	}
