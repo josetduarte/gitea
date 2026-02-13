@@ -169,8 +169,9 @@
 		<div class="issue-card-bottom">
 			{{/* the labels container must always be present, to help the assignees list right-aligned */}}
 			<div class="issue-card-bottom-part labels-list">
+				{{$repoLink := .Issue.Repo.Link}}
 				{{range $label := .Issue.Labels}}
-					{{$link := print .Issue.Repo.Link "/issues"}}
+					{{$link := print $repoLink "/issues"}}
 					{{$link = QueryBuild $link "labels" $label.ID}}
 					{{ctx.RenderUtils.RenderLabelWithLink $label $link}}
 				{{end}}
